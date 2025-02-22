@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\URL;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Cache;
@@ -23,7 +24,7 @@ class GenerateQrCode extends Controller
         ]);
 
         // Convert values to integers and set defaults if not applicable
-        $timeLimitMinutes = intval($validated['time_limit_minutes']) ?? null;
+        $timeLimitMinutes = intval($validated['time_limit_minutes']) ?? 0;
         $maxExtensions = $validated['can_extend'] ? intval($validated['max_extensions']) : 0;
         $extensionMinutes = $validated['can_extend'] ? intval($validated['extension_minutes']) : 0;
 
@@ -50,11 +51,7 @@ class GenerateQrCode extends Controller
         ? Carbon::parse($limitData['expires_at'])->addDay()
             : now()->addYear());
 
-        $qrCodeContent = json_encode([
-            'identifier' => $identifier,
-            'text' => $text,
-            'signature' => $signature,
-        ]);
+        $signedUrl = URL::signedRoute('verify-qr-code', ['identifier' => $identifier]);
 
         // Generate QR code with the actual text content
         $qrCode = QrCode::format('png')
@@ -62,8 +59,7 @@ class GenerateQrCode extends Controller
             ->color(0, 0, 0)
             ->backgroundColor(255, 255, 255)
             ->margin(4)
-            ->generate($qrCodeContent);
-
+            ->generate($signedUrl);
         return response([
             'qr_code' => base64_encode($qrCode),
             'text' => $text,
@@ -72,40 +68,10 @@ class GenerateQrCode extends Controller
             'max_extensions' => $limitData['max_extensions'],
             'extension_minutes' => $limitData['extension_minutes'],
         ]);
+        // return response([
+        //     'identifier' => $identifier,
+        // ]);
     }
-    // public function verifyQr(Request $request)
-    // {
-    //     // Log incoming request data for debugging
-    //     Log::info('QR Verification Request:', $request->all());
-
-    //     try {
-    //         // Basic validation
-    //         if (!$request->has(['identifier', 'text', 'signature', 'user_id'])) {
-    //             return response()->json([
-    //                 'status' => 'error',
-    //                 'message' => 'Missing required fields'
-    //             ], 400);
-    //         }
-
-    //         $identifier = $request->input('identifier');
-    //         $text = $request->input('text');
-    //         $signature = $request->input('signature');
-    //         $userId = $request->input('user_id');
-
-    //         // Simple response for testing
-    //         return response()->json([
-    //             'status' => 'success',
-    //             'message' => 'QR code verified successfully'
-    //         ]);
-    //     } catch (\Exception $e) {
-    //         Log::error('QR Verification Error: ' . $e->getMessage());
-
-    //         return response()->json([
-    //             'status' => 'error',
-    //             'message' => 'Server error occurred'
-    //         ], 500);
-    //     }
-    // }
 
     public function verifyQr(Request $request)
     {
@@ -117,7 +83,6 @@ class GenerateQrCode extends Controller
             try {
                 $validated = $request->validate([
                     'identifier' => 'required|string',
-                    'signature' => 'required|string',
                     'user_id' => 'required', // Removed string validation
                 ]);
             } catch (\Illuminate\Validation\ValidationException $e) {
@@ -130,28 +95,10 @@ class GenerateQrCode extends Controller
             }
 
             $identifier = $validated['identifier'];
-            $signature = $validated['signature'];
             $userId = $validated['user_id'];
 
             // Log validated data
             Log::info('Validated data:', $validated);
-
-            // Signature verification
-            $expectedSignature = hash_hmac('sha256', $identifier, config('app.key'));
-            Log::info('Signature check:',
-                [
-                    'expected' => $expectedSignature,
-                    'received' => $signature
-                ]
-            );
-
-            if (!hash_equals($expectedSignature, $signature)) {
-                Log::warning('Invalid signature for identifier: ' . $identifier);
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Invalid QR code signature'
-                ], 403);
-            }
 
             // Cache check
             $limitData = Cache::get("qr_limit_{$identifier}");
@@ -218,6 +165,39 @@ class GenerateQrCode extends Controller
             ], 500);
         }
     }
+
+    public function verify($identifier)
+    {
+        Log::info('Identifier', ['identifier' => $identifier]);
+
+        // Karena kita menggunakan middleware 'signed',
+        // jika request sampai ke sini berarti signature sudah valid
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Signature valid',
+            'identifier' => $identifier
+        ]);
+    }
+
+    public function scan(Request $request, $identifier)
+    {
+        
+
+        // Periksa apakah data ada di cache
+        if (!Cache::has("qr_limit_{$identifier}")) {
+            Log::info('Data QR code tidak ada di cache.');
+            return response()->json(['message' => 'QR Code tidak valid atau sudah kedaluwarsa.'], 404);
+        }
+
+        $data = Cache::get("qr_limit_{$identifier}");
+        Log::info('Data pada cache', $data);
+
+        return response()->json([
+            'message' => 'QR Code valid',
+            'data' => $data,
+        ]);
+    }
+
 
     public function extend($identifier)
     {
