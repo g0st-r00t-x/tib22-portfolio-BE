@@ -155,14 +155,8 @@ class AbsenResource extends Resource
                                 $responseData = json_decode($response->getContent(), true);
 
                                 return redirect()->to(
-                                    AbsenResource::getUrl('view-qr-code', [
-                                        'qrCode' => $responseData['qr_code'],
-                                        'expiresAt' => $responseData['expires_at'],
-                                        'canExtend' => $responseData['can_extend'],
-                                        'maxExtensions' => $responseData['max_extensions'],
-                                        'extensionMinutes' => $responseData['extension_minutes'],
-                                    ])
-                                );
+    AbsenResource::getUrl('view-qr-code')
+)->with('qr_data', $responseData);
                             }
                         } catch (\Exception $e) {
                             Notification::make()
